@@ -25,21 +25,3 @@ Plataforma web integral orientada a la centralización, estructuración y consul
 | **IA & NLP** | RAG (Retrieval-Augmented Generation), LangChain / Embeddings |
 
 ---
-
-## 📂 Estructura del Repositorio
-
-```text
-miayudante/
-├── scrapers/
-│   ├── base.py              # Clase base y configuración de WebDriver
-│   ├── inacap_scraper.py    # Pipeline de extracción INACAP
-│   ├── duoc_scraper.py      # Pipeline de extracción Duoc UC
-│   └── run_scrapers.py      # Orquestador general de recolección
-├── backend/
-│   ├── manage.py
-│   ├── core/                # Configuración global del proyecto Django
-│   └── academic/            # App para gestión de carreras, sedes y mallas
-├── data/
-│   └── carreras_completas.json  # Dataset estructurado extraído
-├── requirements.txt         # Dependencias del entorno Python
-└── README.md
