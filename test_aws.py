@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 from datetime import datetime
 from dotenv import load_dotenv
 import boto3
@@ -123,3 +124,6 @@ if __name__ == "__main__":
     rds_ok = probar_rds()
     if s3_ok and rds_ok:
         print("\n🎉 ¡TODOS LOS SERVICIOS FUNCIONAN CORRECTAMENTE EN AWS!")
+    else:
+        print("\n✗ La prueba de AWS falló. Revisa credenciales, permisos IAM, red y variables de entorno.")
+        sys.exit(1)

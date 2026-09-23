@@ -1,6 +1,7 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
+
 def crear_driver():
     opciones = Options()
     opciones.add_argument("--headless=new")
@@ -10,7 +11,8 @@ def crear_driver():
     opciones.add_argument("--window-size=1280,720")
     opciones.add_argument("--disable-extensions")
     opciones.add_argument("--disable-infobars")
-    
+    opciones.add_argument("--disable-blink-features=AutomationControlled")
+
     # Bloquear descarga de imágenes para ahorrar CPU y RAM
     prefs = {
         "profile.managed_default_content_settings.images": 2,
@@ -20,8 +22,8 @@ def crear_driver():
     opciones.add_argument(
         "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
-    
+
     driver = webdriver.Chrome(options=opciones)
-    driver.set_page_load_timeout(30)
-    driver.implicitly_wait(4)
+    driver.set_page_load_timeout(20)
+    driver.implicitly_wait(2)
     return driver

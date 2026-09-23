@@ -12,40 +12,89 @@ class DuocScraper:
         self.urls_a_visitar = set()
         self.datos_carreras = []
 
+    def _cargar_todas_las_tarjetas(self, driver):
+        """Hace clic iterativo en 'Ver más resultados' hasta desplegar todas las carreras de la vista."""
+        while True:
+            try:
+                # Buscar el botón 'Ver más resultados'
+                boton_ver_mas = driver.find_elements(By.CSS_SELECTOR, "button.bc-btn-ver-mas")
+                if not boton_ver_mas or not boton_ver_mas[0].is_displayed():
+                    break
+
+                # Desplazar la vista y hacer clic mediante JavaScript para evitar bloqueos
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", boton_ver_mas[0])
+                time.sleep(1)
+                driver.execute_script("arguments[0].click();", boton_ver_mas[0])
+                time.sleep(2)
+            except Exception:
+                break
+
     def recolectar_enlaces(self, driver):
-        print(f"[{self.institucion}] Explorando catálogo...")
-        driver.get(self.url_base)
+        print(f"[{self.institucion}] Explorando catálogo completo...")
+        self.urls_a_visitar.clear()
+
         try:
+            driver.get(self.url_base)
             WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".bc-card h3 a, a.bc-ver-carrera"))
             )
-            elementos = driver.find_elements(By.CSS_SELECTOR, ".bc-card h3 a, a.bc-ver-carrera")
-            for elem in elementos:
+            time.sleep(2)
+
+            # 1. Procesar pestaña 'Carreras Profesionales' (activa por defecto)
+            print(f"[{self.institucion}] Desplegando Carreras Profesionales...")
+            self._cargar_todas_las_tarjetas(driver)
+
+            # Recolectar enlaces del primer lote
+            cards = driver.find_elements(By.CSS_SELECTOR, ".bc-card h3 a, a.bc-ver-carrera")
+            for elem in cards:
                 href = elem.get_attribute("href")
                 if href and "/carreras/" in href:
                     clean_url = href.split("?")[0].rstrip("/")
                     if not clean_url.endswith("/carreras") and not clean_url.endswith("duoc.cl"):
                         self.urls_a_visitar.add(clean_url)
-            print(f"[{self.institucion}] Se encontraron {len(self.urls_a_visitar)} carreras únicas.")
+            print(f"[{self.institucion}] Profesionales cargadas. Subtotal acumulado: {len(self.urls_a_visitar)}")
+
+            # 2. Cambiar a la pestaña 'Carreras Técnicas'
+            pestana_tecnicas = driver.find_elements(By.CSS_SELECTOR, "button.bc-tab[data-tipo='Técnica']")
+            if pestana_tecnicas:
+                print(f"[{self.institucion}] Cambiando a pestaña de Carreras Técnicas...")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", pestana_tecnicas[0])
+                time.sleep(1)
+                driver.execute_script("arguments[0].click();", pestana_tecnicas[0])
+                time.sleep(3)
+
+                # Desplegar todas las técnicas con el botón 'Ver más'
+                self._cargar_todas_las_tarjetas(driver)
+
+                # Recolectar enlaces del segundo lote
+                cards_tec = driver.find_elements(By.CSS_SELECTOR, ".bc-card h3 a, a.bc-ver-carrera")
+                for elem in cards_tec:
+                    href = elem.get_attribute("href")
+                    if href and "/carreras/" in href:
+                        clean_url = href.split("?")[0].rstrip("/")
+                        if not clean_url.endswith("/carreras") and not clean_url.endswith("duoc.cl"):
+                            self.urls_a_visitar.add(clean_url)
+
+            print(f"[{self.institucion}] Total de carreras encontradas en Duoc UC: {len(self.urls_a_visitar)}")
         except Exception as e:
-            print(f"[{self.institucion}] Error recolectando enlaces: {e}")
+            print(f"[{self.institucion}] Error recolectando catálogo: {e}")
 
     def extraer_detalles(self):
         print(f"[{self.institucion}] Extrayendo detalles de {len(self.urls_a_visitar)} carreras...")
         urls = list(self.urls_a_visitar)
         driver = crear_driver()
-        
+
         try:
             for idx, url in enumerate(urls, 1):
                 try:
                     driver.get(url)
-                    
-                    # 1. Nombre de la Carrera
+
+                    # 1. Título
                     try:
                         WebDriverWait(driver, 8).until(
                             EC.presence_of_element_located((By.CSS_SELECTOR, "h1.name, h1"))
                         )
-                        carrera = driver.find_element(By.CSS_SELECTOR, "h1.name, h1").text.strip().split("\n")[0].strip()
+                        carrera = driver.find_element(By.CSS_SELECTOR, "h1.name, h1").text.strip().split("\n")[0].strip() or "Carrera Duoc UC"
                     except:
                         carrera = "Carrera Duoc UC"
 
@@ -72,7 +121,7 @@ class DuocScraper:
                     except:
                         pass
                     if not sedes:
-                        sedes = ["Consultar sedes disponibles en portal Duoc"]
+                        sedes = ["Consultar sedes en portal Duoc"]
 
                     # 4. Malla Curricular
                     malla_dict = {}
@@ -98,9 +147,9 @@ class DuocScraper:
                 except Exception as e:
                     print(f"Error procesando {url}: {e}")
 
-                # Liberación de memoria cada 20 visitas para proteger la RAM de la t3.small
+                # Liberación periódica de RAM en t3.small
                 if idx % 20 == 0 and idx < len(urls):
-                    print(f"-> [Duoc UC] Reiniciando navegador para liberar memoria RAM...")
+                    print(f"-> [Duoc UC] Liberando memoria RAM...")
                     driver.quit()
                     time.sleep(2)
                     driver = crear_driver()

@@ -23,7 +23,7 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 def guardar_en_s3(datos):
     if not BUCKET_NAME:
         print("[S3] S3_BUCKET_NAME no configurado. Omitiendo subida a S3.")
-        return
+        return False
     try:
         # En EC2 con LabRole o credenciales IAM, boto3 se autentica de forma transparente
         s3 = boto3.client("s3", region_name=AWS_REGION)
@@ -35,13 +35,17 @@ def guardar_en_s3(datos):
             ContentType="application/json; charset=utf-8"
         )
         print(f"[✓ S3] Respaldo guardado en: s3://{BUCKET_NAME}/{key}")
+        return True
     except Exception as e:
         print(f"[✗ S3] Error al guardar en S3: {e}")
+        return False
 
 def guardar_en_rds(datos):
     if not DB_HOST or not DB_PASSWORD:
         print("[RDS] Error: Variables de base de datos no configuradas.")
-        return
+        return False
+    conn = None
+    cur = None
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
@@ -95,11 +99,18 @@ def guardar_en_rds(datos):
 
         execute_values(cur, sql_upsert, filas)
         conn.commit()
-        cur.close()
-        conn.close()
         print(f"[✓ RDS] Se actualizaron {len(filas)} registros en PostgreSQL.")
+        return True
     except Exception as e:
+        if conn is not None:
+            conn.rollback()
         print(f"[✗ RDS] Error al insertar en PostgreSQL: {e}")
+        return False
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 
 def ejecutar_pipeline():
     print(f"=== INICIO DEL PIPELINE ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ===")
@@ -107,26 +118,33 @@ def ejecutar_pipeline():
     
     # 1. Duoc UC
     driver_links = crear_driver()
-    duoc = DuocScraper()
-    duoc.recolectar_enlaces(driver_links)
-    driver_links.quit()
+    try:
+        duoc = DuocScraper()
+        duoc.recolectar_enlaces(driver_links)
+    finally:
+        driver_links.quit()
     duoc.extraer_detalles()
     todos_los_datos.extend(duoc.datos_carreras)
 
     # 2. INACAP
     driver_links = crear_driver()
-    inacap = InacapScraper()
-    inacap.recolectar_enlaces(driver_links)
-    driver_links.quit()
+    try:
+        inacap = InacapScraper()
+        inacap.recolectar_enlaces(driver_links)
+    finally:
+        driver_links.quit()
     inacap.extraer_detalles()
     todos_los_datos.extend(inacap.datos_carreras)
 
     # 3. Almacenar resultados en la nube
     if todos_los_datos:
         print(f"\n[+] Total de carreras obtenidas: {len(todos_los_datos)}")
-        guardar_en_s3(todos_los_datos)
-        guardar_en_rds(todos_los_datos)
-        print("=== PIPELINE COMPLETADO EXITOSAMENTE ===")
+        s3_ok = guardar_en_s3(todos_los_datos)
+        rds_ok = guardar_en_rds(todos_los_datos)
+        if s3_ok and rds_ok:
+            print("=== PIPELINE COMPLETADO EXITOSAMENTE ===")
+        else:
+            print("=== PIPELINE COMPLETADO CON ERRORES DE ALMACENAMIENTO ===")
     else:
         print("[!] No se extrajeron datos.")
 
