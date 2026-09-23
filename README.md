@@ -30,25 +30,16 @@ Plataforma web integral orientada a la centralización, estructuración y consul
 
 ```text
 miayudante/
-├── WEB_SCRAPPING/
-│   └── scrapers/
-│       ├── base_scraper.py   # Estado y comportamiento común
-│       ├── inacap_scraper.py # Pipeline de extracción INACAP
-│       ├── duoc_scraper.py   # Pipeline de extracción Duoc UC
-│       ├── driver.py         # Configuración del WebDriver
-│       ├── main.py           # Orquestador y guardado del JSON
-│       └── testing.py        # Compatibilidad con el script anterior
+├── scrapers/
+│   ├── base.py              # Clase base y configuración de WebDriver
+│   ├── inacap_scraper.py    # Pipeline de extracción INACAP
+│   ├── duoc_scraper.py      # Pipeline de extracción Duoc UC
+│   └── run_scrapers.py      # Orquestador general de recolección
+├── backend/
+│   ├── manage.py
+│   ├── core/                # Configuración global del proyecto Django
+│   └── academic/            # App para gestión de carreras, sedes y mallas
+├── data/
+│   └── carreras_completas.json  # Dataset estructurado extraído
 ├── requirements.txt         # Dependencias del entorno Python
 └── README.md
-```
-
-## Ejecución en AWS Learner Lab
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m WEB_SCRAPPING.scrapers.main
-```
-
-El resultado se guarda en `WEB_SCRAPPING/carreras_completas.json`. La instancia debe tener Google Chrome o Chromium instalado.
