@@ -1,20 +1,30 @@
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 def crear_driver():
     opciones = Options()
+
+    # 1. Ruta binaria explícita a Google Chrome oficial
+    if os.path.exists("/usr/bin/google-chrome"):
+        opciones.binary_location = "/usr/bin/google-chrome"
+
+    # 2. Flags esenciales para headless en Linux
     opciones.add_argument("--headless=new")
     opciones.add_argument("--no-sandbox")
     opciones.add_argument("--disable-dev-shm-usage")
     opciones.add_argument("--disable-gpu")
+    opciones.add_argument("--disable-software-rasterizer")
     opciones.add_argument("--window-size=1920,1080")
-    
-    # Bloqueo de imágenes para que la navegación sea mucho más rápida
+
+    # Desactivar extensiones y bloquear imágenes para velocidad
+    opciones.add_argument("--disable-extensions")
     prefs = {"profile.managed_default_content_settings.images": 2}
     opciones.add_experimental_option("prefs", prefs)
-    
+
     opciones.add_argument(
-        "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     )
 
     driver = webdriver.Chrome(options=opciones)
