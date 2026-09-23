@@ -22,26 +22,25 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 def guardar_en_s3(datos):
     if not BUCKET_NAME:
-        print("[S3] S3_BUCKET_NAME no configurado. Se omite respaldo en S3.")
+        print("[S3] S3_BUCKET_NAME no configurado. Omitiendo subida a S3.")
         return
     try:
+        # En EC2 con LabRole o credenciales IAM, boto3 se autentica de forma transparente
         s3 = boto3.client("s3", region_name=AWS_REGION)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        key = f"raw/academic_offer_{timestamp}.json"
-        
+        key = f"raw/academic_offer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         s3.put_object(
             Bucket=BUCKET_NAME,
             Key=key,
             Body=json.dumps(datos, ensure_ascii=False, indent=2),
             ContentType="application/json; charset=utf-8"
         )
-        print(f"[S3] Respaldo guardado exitosamente en s3://{BUCKET_NAME}/{key}")
+        print(f"[✓ S3] Respaldo guardado en: s3://{BUCKET_NAME}/{key}")
     except Exception as e:
-        print(f"[S3] Error al guardar en S3: {e}")
+        print(f"[✗ S3] Error al guardar en S3: {e}")
 
 def guardar_en_rds(datos):
     if not DB_HOST or not DB_PASSWORD:
-        print("[RDS] Variables DB_HOST o DB_PASSWORD faltantes.")
+        print("[RDS] Error: Variables de base de datos no configuradas.")
         return
     try:
         conn = psycopg2.connect(
@@ -54,31 +53,30 @@ def guardar_en_rds(datos):
         )
         cur = conn.cursor()
         
-        sql_create = """
-        CREATE TABLE IF NOT EXISTS academic_offer (
-            url_detalle VARCHAR(500) PRIMARY KEY,
-            institucion VARCHAR(100) NOT NULL,
-            carrera VARCHAR(250) NOT NULL,
-            descripcion TEXT,
-            sedes JSONB,
-            malla_url TEXT,
-            malla_curricular JSONB,
-            fecha_extraccion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        cur.execute(sql_create)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS academic_offer (
+                url_detalle VARCHAR(500) PRIMARY KEY,
+                institucion VARCHAR(100) NOT NULL,
+                carrera VARCHAR(250) NOT NULL,
+                descripcion TEXT,
+                sedes JSONB,
+                malla_url TEXT,
+                malla_curricular JSONB,
+                fecha_extraccion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
 
         sql_upsert = """
-        INSERT INTO academic_offer (url_detalle, institucion, carrera, descripcion, sedes, malla_url, malla_curricular, fecha_extraccion)
-        VALUES %s
-        ON CONFLICT (url_detalle) DO UPDATE SET
-            institucion = EXCLUDED.institucion,
-            carrera = EXCLUDED.carrera,
-            descripcion = EXCLUDED.descripcion,
-            sedes = EXCLUDED.sedes,
-            malla_url = EXCLUDED.malla_url,
-            malla_curricular = EXCLUDED.malla_curricular,
-            fecha_extraccion = CURRENT_TIMESTAMP;
+            INSERT INTO academic_offer (url_detalle, institucion, carrera, descripcion, sedes, malla_url, malla_curricular, fecha_extraccion)
+            VALUES %s
+            ON CONFLICT (url_detalle) DO UPDATE SET
+                institucion = EXCLUDED.institucion,
+                carrera = EXCLUDED.carrera,
+                descripcion = EXCLUDED.descripcion,
+                sedes = EXCLUDED.sedes,
+                malla_url = EXCLUDED.malla_url,
+                malla_curricular = EXCLUDED.malla_curricular,
+                fecha_extraccion = CURRENT_TIMESTAMP;
         """
 
         filas = [
@@ -99,39 +97,38 @@ def guardar_en_rds(datos):
         conn.commit()
         cur.close()
         conn.close()
-        print(f"[RDS] Se insertaron/actualizaron {len(filas)} registros en PostgreSQL.")
+        print(f"[✓ RDS] Se actualizaron {len(filas)} registros en PostgreSQL.")
     except Exception as e:
-        print(f"[RDS] Error al persistir en base de datos: {e}")
+        print(f"[✗ RDS] Error al insertar en PostgreSQL: {e}")
 
 def ejecutar_pipeline():
-    print("=== INICIANDO PIPELINE DE EXTRACCIÓN Y CARGA ===")
-    driver = crear_driver()
+    print(f"=== INICIO DEL PIPELINE ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ===")
     todos_los_datos = []
     
-    try:
-        # 1. Duoc UC
-        duoc = DuocScraper(driver)
-        duoc.recolectar_enlaces()
-        duoc.extraer_detalles()
-        todos_los_datos.extend(duoc.datos_carreras)
+    # 1. Duoc UC
+    driver_links = crear_driver()
+    duoc = DuocScraper()
+    duoc.recolectar_enlaces(driver_links)
+    driver_links.quit()
+    duoc.extraer_detalles()
+    todos_los_datos.extend(duoc.datos_carreras)
 
-        # 2. INACAP
-        inacap = InacapScraper(driver)
-        inacap.recolectar_enlaces()
-        inacap.extraer_detalles()
-        todos_los_datos.extend(inacap.datos_carreras)
+    # 2. INACAP
+    driver_links = crear_driver()
+    inacap = InacapScraper()
+    inacap.recolectar_enlaces(driver_links)
+    driver_links.quit()
+    inacap.extraer_detalles()
+    todos_los_datos.extend(inacap.datos_carreras)
 
-    finally:
-        driver.quit()
-        print("[+] Navegador cerrado.")
-
+    # 3. Almacenar resultados en la nube
     if todos_los_datos:
-        print(f"\n[+] Total registros procesados: {len(todos_los_datos)}")
+        print(f"\n[+] Total de carreras obtenidas: {len(todos_los_datos)}")
         guardar_en_s3(todos_los_datos)
         guardar_en_rds(todos_los_datos)
-        print("=== PROCESO FINALIZADO CON ÉXITO ===")
+        print("=== PIPELINE COMPLETADO EXITOSAMENTE ===")
     else:
-        print("[!] No se obtuvieron datos para persistir.")
+        print("[!] No se extrajeron datos.")
 
 if __name__ == "__main__":
     ejecutar_pipeline()

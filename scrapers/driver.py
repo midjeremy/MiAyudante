@@ -7,11 +7,21 @@ def crear_driver():
     opciones.add_argument("--no-sandbox")
     opciones.add_argument("--disable-dev-shm-usage")
     opciones.add_argument("--disable-gpu")
-    opciones.add_argument("--window-size=1920,1080")
+    opciones.add_argument("--window-size=1280,720")
+    opciones.add_argument("--disable-extensions")
+    opciones.add_argument("--disable-infobars")
+    
+    # Bloquear descarga de imágenes para ahorrar CPU y RAM
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,
+        "disk-cache-size": 4096
+    }
+    opciones.add_experimental_option("prefs", prefs)
     opciones.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
     
     driver = webdriver.Chrome(options=opciones)
-    driver.implicitly_wait(5)
+    driver.set_page_load_timeout(30)
+    driver.implicitly_wait(4)
     return driver
