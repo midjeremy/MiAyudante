@@ -6,7 +6,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from scrapers.driver import crear_driver
 
-
 class InacapScraper:
     def __init__(self):
         self.institucion = "INACAP"
@@ -19,7 +18,7 @@ class InacapScraper:
         self.urls_a_visitar.clear()
         try:
             driver.get(self.url_base)
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 12).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/carreras/']"))
             )
             elementos = driver.find_elements(By.CSS_SELECTOR, "a[href*='/carreras/']")
@@ -34,62 +33,63 @@ class InacapScraper:
         except Exception as e:
             print(f"[{self.institucion}] Error recolectando enlaces: {e}")
 
-    def _extraer_malla_interactiva(self, driver, url_malla):
-        """Navega a la URL de la malla en SIGA y extrae asignaturas por semestre."""
-        semestres = []
+    def _extraer_malla_siga_inacap(self, driver, url_siga):
+        """Navega al visor SIGA y extrae los semestres en el formato: 'ASIGNATURA - CÓDIGO'."""
         try:
-            driver.get(url_malla)
+            driver.get(url_siga)
             WebDriverWait(driver, 8).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "#tblPrincipal td.tarjeta .font-asignatura"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#tblPrincipal"))
             )
+            time.sleep(1.5)
 
-            # Cabeceras de semestres
-            th_elems = driver.find_elements(By.CSS_SELECTOR, "#tblPrincipal tbody tr:first-child td h4")
-            nombres_semestres = [th.text.strip() for th in th_elems if th.text.strip()]
-            num_cols = len(nombres_semestres)
+            # Extraer columnas y asignaturas directamente desde el DOM mediante JavaScript
+            script = """
+            var result = {};
+            var table = document.querySelector('#tblPrincipal');
+            if (!table) return result;
 
-            if num_cols == 0:
-                return {}
+            var headerCells = table.querySelectorAll('tr:first-child .semestre h4');
+            var headers = [];
+            for (var i = 0; i < headerCells.length; i++) {
+                headers.push(headerCells[i].innerText.trim());
+            }
 
-            mapa_semestres = {i: {"semestre": nombres_semestres[i], "asignaturas": []} for i in range(num_cols)}
+            var allCells = table.querySelectorAll('td[ng-repeat="item in item"]');
+            if (headers.length === 0 || allCells.length === 0) return result;
 
-            # Filas de asignaturas
-            filas_datos = driver.find_elements(By.CSS_SELECTOR, "#tblPrincipal tbody tr")
-            for fila in filas_datos:
-                # Omitir filas de cabecera y totales de horas
-                if fila.find_elements(By.CSS_SELECTOR, ".card-hrs"):
-                    continue
+            for (var i = 0; i < allCells.length; i++) {
+                var colIdx = i % headers.length;
+                var semName = headers[colIdx];
+                if (!result[semName]) result[semName] = [];
 
-                tds = fila.find_elements(By.XPATH, "./td")
-                if len(tds) < num_cols:
-                    continue
-
-                for col_idx in range(num_cols):
-                    td = tds[col_idx]
-                    tarjetas = td.find_elements(By.CSS_SELECTOR, "td.tarjeta")
-                    for card in tarjetas:
-                        nombre_elem = card.find_elements(By.CSS_SELECTOR, ".font-asignatura")
-                        codigo_elem = card.find_elements(By.CSS_SELECTOR, ".font-codigo")
-
-                        nombre = nombre_elem[0].text.strip() if nombre_elem else ""
-                        codigo = codigo_elem[0].text.strip() if codigo_elem else ""
-
-                        if nombre:
-                            asig_dict = {"nombre": nombre}
-                            if codigo:
-                                asig_dict["codigo"] = codigo
-                            mapa_semestres[col_idx]["asignaturas"].append(asig_dict)
-
-            semestres = [mapa_semestres[i] for i in range(num_cols) if mapa_semestres[i]["asignaturas"]]
+                var tarjetas = allCells[i].querySelectorAll('.tarjeta');
+                for (var t = 0; t < tarjetas.length; t++) {
+                    var asigEl = tarjetas[t].querySelector('.font-asignatura');
+                    var codEl = tarjetas[t].querySelector('.font-codigo');
+                    var asig = asigEl ? asigEl.innerText.trim() : '';
+                    var cod = codEl ? codEl.innerText.trim() : '';
+                    if (asig && cod) {
+                        var itemStr = asig + ' - ' + cod;
+                        if (result[semName].indexOf(itemStr) === -1) {
+                            result[semName].push(itemStr);
+                        }
+                    }
+                }
+            }
+            return result;
+            """
+            data_malla = driver.execute_script(script)
+            if data_malla and isinstance(data_malla, dict):
+                # Filtrar semestres vacíos
+                return {k: v for k, v in data_malla.items() if len(v) > 0}
         except Exception as e:
-            print(f"[{self.institucion}] Advertencia extrayendo malla interactiva: {e}")
+            print(f"[{self.institucion}] Advertencia extrayendo malla SIGA: {e}")
 
-        return {"semestres": semestres} if semestres else {}
+        return {}
 
     def extraer_detalles(self):
         print(f"[{self.institucion}] Extrayendo detalles de {len(self.urls_a_visitar)} carreras...")
-        self.datos_carreras.clear()
-        urls = sorted(self.urls_a_visitar)
+        urls = list(self.urls_a_visitar)
         driver = crear_driver()
 
         try:
@@ -97,36 +97,16 @@ class InacapScraper:
                 try:
                     driver.get(url)
 
-                    # 1. Nombre de la Carrera
+                    # 1. Título
                     try:
-                        WebDriverWait(driver, 6).until(
+                        WebDriverWait(driver, 8).until(
                             EC.presence_of_element_located((By.CSS_SELECTOR, "h1.component-heading, h1"))
                         )
                         carrera = driver.find_element(By.CSS_SELECTOR, "h1.component-heading, h1").text.strip() or "Carrera INACAP"
                     except Exception:
                         carrera = "Carrera INACAP"
 
-                    # 2. Datos generales (Título, Duración, Requisitos)
-                    titulo_otorgado = ""
-                    duracion = ""
-                    requisitos_ingreso = ""
-
-                    try:
-                        tit_el = driver.find_elements(By.CSS_SELECTOR, "#btncarrera span.tit-pro")
-                        if tit_el:
-                            titulo_otorgado = tit_el[0].text.replace("Título:", "").strip()
-
-                        dur_el = driver.find_elements(By.CSS_SELECTOR, "#btncarrera span.duracion")
-                        if dur_el:
-                            duracion = dur_el[0].text.replace("Duración:", "").strip()
-
-                        req_el = driver.find_elements(By.CSS_SELECTOR, ".msn-rojo p")
-                        if req_el:
-                            requisitos_ingreso = req_el[0].text.replace("Requisitos de ingreso:", "").strip()
-                    except Exception:
-                        pass
-
-                    # 3. Descripción
+                    # 2. Descripción
                     descripcion = ""
                     try:
                         elem_desc = driver.find_elements(By.CSS_SELECTOR, "#descripcion .interior-panel, .parrafo-acrodeon-carreras")
@@ -138,21 +118,25 @@ class InacapScraper:
                     except Exception:
                         descripcion = "Sin descripción disponible"
 
-                    # 4. Enlaces de Malla (PDF e Interactiva SIGA)
-                    malla_pdf_url = None
-                    malla_digital_url = ""
+                    # 3. Malla digital (SIGA) y PDF
+                    malla_url = url
+                    url_malla_siga = ""
                     try:
+                        siga_btn = driver.find_elements(By.CSS_SELECTOR, "a[href*='MallaCurricular'], a.btn-digital a")
+                        if siga_btn:
+                            url_malla_siga = siga_btn[0].get_attribute("href")
+
                         pdf_btn = driver.find_elements(By.CSS_SELECTOR, "a[href*='pdf_mallas'], a.btn-descargar a")
                         if pdf_btn:
-                            malla_pdf_url = pdf_btn[0].get_attribute("href")
-
-                        digital_btn = driver.find_elements(By.CSS_SELECTOR, "a[href*='MallaCurricular'], a.btn-digital a")
-                        if digital_btn:
-                            malla_digital_url = digital_btn[0].get_attribute("href")
+                            malla_url = pdf_btn[0].get_attribute("href")
                     except Exception:
                         pass
 
-                    # 5. Sedes que imparten la carrera
+                    # Si hay enlace a SIGA, esa es la URL principal de la malla mostrada en carreras_completas.json
+                    if url_malla_siga:
+                        malla_url = url_malla_siga
+
+                    # 4. Sedes (Lista limpia de nombres de sedes)
                     sedes = []
                     try:
                         elementos_sedes = driver.find_elements(
@@ -160,57 +144,47 @@ class InacapScraper:
                             ".sidebarCarrera__sedes .interiorCarrera-sede .btn_sede p, .sidebarCarrera__sedes .interior-panel .btn_sede p"
                         )
                         for s in elementos_sedes:
-                            txt = s.text.strip()
+                            txt = s.text.strip().title()
                             if txt and txt not in sedes:
                                 sedes.append(txt)
 
                         if not sedes:
-                            # Respaldo para selectores alternativos
                             fallback_sedes = driver.find_elements(By.CSS_SELECTOR, ".btn_sede p")
                             for bs in fallback_sedes:
-                                txt = bs.text.strip()
+                                txt = bs.text.strip().title()
                                 if txt and txt not in sedes:
                                     sedes.append(txt)
                     except Exception:
                         pass
 
                     if not sedes:
-                        sedes = ["Campus Digital / Sedes a nivel nacional"]
+                        sedes = ["Campus Digital", "Sedes A Nivel Nacional"]
 
-                    # 6. Extracción de Malla Curricular Estructurada
+                    # 5. Malla Curricular
                     malla_curricular = {}
-                    if malla_pdf_url:
-                        malla_curricular["malla_pdf"] = malla_pdf_url
-                    if malla_digital_url:
-                        malla_curricular["malla_digital_url"] = malla_digital_url
-                        datos_malla = self._extraer_malla_interactiva(driver, malla_digital_url)
-                        if datos_malla.get("semestres"):
-                            malla_curricular["semestres"] = datos_malla["semestres"]
+                    if url_malla_siga:
+                        malla_curricular = self._extraer_malla_siga_inacap(driver, url_malla_siga)
 
                     self.datos_carreras.append({
                         "institucion": self.institucion,
                         "carrera": carrera,
-                        "titulo_otorgado": titulo_otorgado,
-                        "duracion": duracion,
-                        "requisitos_ingreso": requisitos_ingreso,
                         "url_detalle": url,
                         "fecha_extraccion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "sedes": sedes,
                         "descripcion": descripcion,
-                        "malla_url": malla_pdf_url,
+                        "malla_url": malla_url,
                         "malla_curricular": malla_curricular
                     })
-                    print(f"[{idx}/{len(urls)}] INACAP: {carrera}")
+                    print(f"[{idx}/{len(urls)}] INACAP: {carrera} ({len(sedes)} sedes, {len(malla_curricular)} semestres)")
 
                 except (TimeoutException, WebDriverException) as e:
-                    print(f"[INACAP] Timeout o error en página: {url} -> {e}")
+                    print(f"[INACAP] Error en página: {url} -> {e}")
                     continue
                 except Exception as e:
                     print(f"Error procesando {url}: {e}")
 
-                # Liberar RAM cada 20 registros
                 if idx % 20 == 0 and idx < len(urls):
-                    print(f"-> [INACAP] Reiniciando navegador para liberar memoria RAM...")
+                    print(f"-> [INACAP] Liberando memoria RAM...")
                     driver.quit()
                     time.sleep(2)
                     driver = crear_driver()
