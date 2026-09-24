@@ -62,24 +62,42 @@ def guardar_en_rds(datos):
                 url_detalle VARCHAR(500) PRIMARY KEY,
                 institucion VARCHAR(100) NOT NULL,
                 carrera VARCHAR(250) NOT NULL,
+                titulo_otorgado TEXT,
+                duracion VARCHAR(100),
+                requisitos_ingreso TEXT,
                 descripcion TEXT,
                 sedes JSONB,
+                detalle_sedes JSONB,
                 malla_url TEXT,
                 malla_curricular JSONB,
+                mallas_digitales JSONB,
                 fecha_extraccion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        for columna, tipo in (
+            ("titulo_otorgado", "TEXT"),
+            ("duracion", "VARCHAR(100)"),
+            ("requisitos_ingreso", "TEXT"),
+            ("detalle_sedes", "JSONB"),
+            ("mallas_digitales", "JSONB"),
+        ):
+            cur.execute(f"ALTER TABLE academic_offer ADD COLUMN IF NOT EXISTS {columna} {tipo};")
 
         sql_upsert = """
-            INSERT INTO academic_offer (url_detalle, institucion, carrera, descripcion, sedes, malla_url, malla_curricular, fecha_extraccion)
+            INSERT INTO academic_offer (url_detalle, institucion, carrera, titulo_otorgado, duracion, requisitos_ingreso, descripcion, sedes, detalle_sedes, malla_url, malla_curricular, mallas_digitales, fecha_extraccion)
             VALUES %s
             ON CONFLICT (url_detalle) DO UPDATE SET
                 institucion = EXCLUDED.institucion,
                 carrera = EXCLUDED.carrera,
+                titulo_otorgado = EXCLUDED.titulo_otorgado,
+                duracion = EXCLUDED.duracion,
+                requisitos_ingreso = EXCLUDED.requisitos_ingreso,
                 descripcion = EXCLUDED.descripcion,
                 sedes = EXCLUDED.sedes,
+                detalle_sedes = EXCLUDED.detalle_sedes,
                 malla_url = EXCLUDED.malla_url,
                 malla_curricular = EXCLUDED.malla_curricular,
+                mallas_digitales = EXCLUDED.mallas_digitales,
                 fecha_extraccion = CURRENT_TIMESTAMP;
         """
 
@@ -88,11 +106,16 @@ def guardar_en_rds(datos):
                 d["url_detalle"],
                 d["institucion"],
                 d["carrera"],
-                d["descripcion"],
-                Json(d["sedes"]),
-                d["malla_url"],
-                Json(d["malla_curricular"]),
-                d["fecha_extraccion"]
+                d.get("titulo_otorgado", ""),
+                d.get("duracion", ""),
+                d.get("requisitos_ingreso", ""),
+                d.get("descripcion", ""),
+                Json(d.get("sedes", [])),
+                Json(d.get("detalle_sedes", [])),
+                d.get("malla_url"),
+                Json(d.get("malla_curricular", {})),
+                Json(d.get("mallas_digitales", [])),
+                d.get("fecha_extraccion")
             )
             for d in datos
         ]
@@ -116,25 +139,22 @@ def ejecutar_pipeline():
     print(f"=== INICIO DEL PIPELINE ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ===")
     todos_los_datos = []
     
-    # 1. Duoc UC
-    driver_links = crear_driver()
-    try:
-        duoc = DuocScraper()
-        duoc.recolectar_enlaces(driver_links)
-    finally:
-        driver_links.quit()
-    duoc.extraer_detalles()
-    todos_los_datos.extend(duoc.datos_carreras)
+    for nombre, scraper in (("Duoc UC", DuocScraper()), ("INACAP", InacapScraper())):
+        driver_links = None
+        try:
+            driver_links = crear_driver()
+            scraper.recolectar_enlaces(driver_links)
+        except Exception as e:
+            print(f"[Pipeline] Error recolectando enlaces de {nombre}: {e}")
+        finally:
+            if driver_links is not None:
+                driver_links.quit()
 
-    # 2. INACAP
-    driver_links = crear_driver()
-    try:
-        inacap = InacapScraper()
-        inacap.recolectar_enlaces(driver_links)
-    finally:
-        driver_links.quit()
-    inacap.extraer_detalles()
-    todos_los_datos.extend(inacap.datos_carreras)
+        try:
+            scraper.extraer_detalles()
+            todos_los_datos.extend(scraper.datos_carreras)
+        except Exception as e:
+            print(f"[Pipeline] Error extrayendo detalles de {nombre}: {e}")
 
     # 3. Almacenar resultados en la nube
     if todos_los_datos:

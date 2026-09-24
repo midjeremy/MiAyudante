@@ -1,16 +1,22 @@
 import os
+import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 
 def crear_driver():
     opciones = Options()
 
-    # 1. Ruta binaria explícita a Google Chrome oficial
-    if os.path.exists("/usr/bin/google-chrome"):
-        opciones.binary_location = "/usr/bin/google-chrome"
+    for ruta in (
+        os.getenv("CHROME_BINARY"),
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ):
+        if ruta and (os.path.exists(ruta) or shutil.which(ruta)):
+            opciones.binary_location = ruta
+            break
 
-    # 2. Flags esenciales para headless en Linux
+    opciones.page_load_strategy = "eager"
     opciones.add_argument("--headless=new")
     opciones.add_argument("--no-sandbox")
     opciones.add_argument("--disable-dev-shm-usage")
@@ -29,5 +35,5 @@ def crear_driver():
 
     driver = webdriver.Chrome(options=opciones)
     driver.set_page_load_timeout(45)
-    driver.implicitly_wait(4)
+    driver.set_script_timeout(30)
     return driver
